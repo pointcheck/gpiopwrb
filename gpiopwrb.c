@@ -11,8 +11,8 @@
 #include <sys/systm.h>
 #include <sys/kthread.h>
 #include <sys/mutex.h>
-#include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/kenv.h>
 #include <sys/bus.h>
 #include <sys/gpio.h>
 #include <machine/bus.h>
@@ -23,11 +23,10 @@
 
 #include "gpiobus_if.h"
 
-//#define	GPIO_POLL_TIMEO	(1000/4)	// Poll GPIO every 1/4 second
-#define	GPIO_POLL_TIMEO	(1000)
+#define	GPIO_POLL_TIMEO	(1000/4)	// Poll GPIO every 1/4 second
 #define	GPIO_PWRB_PIN_NUM	0	// Pin number to monitor: pin 0
 
-#define	GPIOPWRB_DEBUG	1
+//#define	GPIOPWRB_DEBUG	1
 
 #ifdef GPIOPWRB_DEBUG
 #define dprintf printf
@@ -43,7 +42,7 @@ struct gpiopwrb_softc {
 	ACPI_HANDLE acpi_handle;
 	struct mtx thread_mtx;
 	int thread_terminate;
-	int pinnum;
+	int pin_num;
 } gpiopwrb_softc_sc; /* we use global softc because we need it in MOD_LOAD */
 
 static struct thread *gpiopwrb_daemon_thread;
@@ -53,16 +52,16 @@ static void gpiopwrb_daemon(void* arg)
 {
 	struct gpiopwrb_softc* sc = (struct gpiopwrb_softc*) arg;
 
-	if(sc == NULL) {
+	if (sc == NULL) {
 		printf("pwrb: bogus softc, thread stopped!\n");
 		goto stop_daemon;
 	}
 	
 	dprintf("pwrb: kthread %p started, sc = %p\n", gpiopwrb_daemon_thread, sc);
 
-	if(!sc->gpio_pin) {
+	if (!sc->gpio_pin) {
 		printf("pwrb: gpio pin %d has not been acquired during attach!\n",
-			sc->pinnum);
+			sc->pin_num);
 		goto stop_daemon;
 	}
 
@@ -71,16 +70,16 @@ static void gpiopwrb_daemon(void* arg)
 	gpio_pin_is_active(sc->gpio_pin, &gpio_state);
 	gpio_state_prev = gpio_state;
 	
-	dprintf("pwrb: gpio pin %d state = %d\n", sc->pinnum, gpio_state);
+	dprintf("pwrb: gpio pin %d state = %d\n", sc->pin_num, gpio_state);
 
-	while(1) {
+	while (1) {
 		int terminate;
 
 		mtx_lock(&sc->thread_mtx);
 		terminate = sc->thread_terminate;
 		mtx_unlock(&sc->thread_mtx);
 
-		if(terminate > 0)
+		if (terminate > 0)
 			break;
 
 		gpio_pin_is_active(sc->gpio_pin, &gpio_state);
@@ -88,10 +87,11 @@ static void gpiopwrb_daemon(void* arg)
 		bool changed = (gpio_state != gpio_state_prev);
 
 		dprintf("pwrb: poll... gpio pin %d state = %d, changed = %s\n",
-			sc->pinnum, gpio_state, changed ? "YES" : "no");
+			sc->pin_num, gpio_state, changed ? "YES" : "no");
 
-		if(changed) {
-			dprintf("pwrb: emmiting ACPI event\n");
+		if (changed) {
+			printf("pwrb: GPIO pin %d changed, emmiting ACPI event\n",
+				sc->pin_num);
 		}
 
 		gpio_state_prev = gpio_state;
@@ -116,7 +116,7 @@ static void gpiopwrb_identify(driver_t *driver, device_t parent)
 
 	struct gpiopwrb_softc* sc = &gpiopwrb_softc_sc;
 
-	if(sc->child_dev) {
+	if (sc->child_dev) {
 		dprintf("pwrb: child_dev = %p already set for parrent = %p\n",
 			sc->child_dev, parent);
 		return;
@@ -124,12 +124,25 @@ static void gpiopwrb_identify(driver_t *driver, device_t parent)
 
 	sc->child_dev = BUS_ADD_CHILD(parent, 0, "gpiopwrb", -1);
 	sc->gpiobus_dev = parent;
-	sc->pinnum = GPIO_PWRB_PIN_NUM;
+
+	/* Fetch GPIO pin number from Hints */
+
+	char hint_str[32];
+	char *hint_pin_num;
+
+	snprintf(hint_str, 32, "hint.%s.%d.pin_num",
+	    device_get_name(sc->child_dev),
+	    device_get_unit(sc->child_dev));
+
+	if ((hint_pin_num = kern_getenv(hint_str)) != NULL)
+		sc->pin_num = strtol(hint_pin_num, NULL, 0);
+	else
+		sc->pin_num = GPIO_PWRB_PIN_NUM;
 
 	device_set_softc(sc->child_dev, sc);
 
-	dprintf("pwrb: new child_dev = %p for parrent = %p\n",
-		sc->child_dev, parent);
+	dprintf("pwrb: new child_dev = %p for parrent = %p, pin_num = %d, %s = %s\n",
+		sc->child_dev, parent, sc->pin_num, hint_str, hint_pin_num);
 }
 
 static int gpiopwrb_probe(device_t dev)
@@ -154,18 +167,18 @@ static int gpiopwrb_attach(device_t dev)
 	dprintf("pwrb: gpiobus = %s, child = %s\n",
 		device_get_name(sc->gpiobus_dev), device_get_name(sc->child_dev));
 
-	error = gpio_pin_get_by_bus_pinnum(sc->gpiobus_dev, sc->pinnum, &sc->gpio_pin);
+	error = gpio_pin_get_by_bus_pinnum(sc->gpiobus_dev, sc->pin_num, &sc->gpio_pin);
 
-	dprintf("pwrb: gpio_pin_get_by_bus_pinnum error = %d, gpio_pin->pin = %d, "
+	dprintf("pwrb: gpio_pin_get_by_bus_pin_num error = %d, gpio_pin->pin = %d, "
 		"gpio_pin->flags = %x, gpio_pin->dev = %p, devname = %s\n",
 			error,
 			sc->gpio_pin->pin, sc->gpio_pin->flags, sc->gpio_pin->dev,
 			device_get_name(sc->gpio_pin->dev));
 
-	if(error) {
+	if (error) {
 		printf("pwrb: failed to get GPIO pin %d value, gpiobus = %p, "
 			"child = %p, error = %d\n",
-			sc->pinnum, sc->gpiobus_dev, sc->child_dev, error);
+			sc->pin_num, sc->gpiobus_dev, sc->child_dev, error);
 		return (ENXIO);
 	}
 
@@ -176,14 +189,14 @@ static int gpiopwrb_attach(device_t dev)
      	error = kthread_add(gpiopwrb_daemon, sc, NULL, &gpiopwrb_daemon_thread,
 		0, 0, "pwrb_daemon");
 
-	if(error) {
+	if (error) {
 		printf("pwrb: failed to start kthread, error = %d\n", error);
 		return (error);
 	}
 
 	device_set_softc(dev,sc);
 
-	printf("pwrb: attached to gpio pin %d\n", sc->pinnum);
+	printf("pwrb: attached to gpio pin %d\n", sc->pin_num);
 
 	return (0);
 }
@@ -192,7 +205,7 @@ static int gpiopwrb_detach(device_t dev)
 {
 	struct gpiopwrb_softc *sc = device_get_softc(dev);
 
-	if(!sc)
+	if (!sc)
 		return (0);
 
 	kthread_resume(gpiopwrb_daemon_thread); // wakeup thread if it's sleeping
@@ -201,18 +214,18 @@ static int gpiopwrb_detach(device_t dev)
 
 	dprintf("pwrb: waiting thread termination...\n");
 
-	while(1) {
+	while (1) {
 		mtx_lock(&sc->thread_mtx);
 		int tmp = sc->thread_terminate; 
 		mtx_unlock(&sc->thread_mtx);
 
-		if(tmp > 1)
+		if (tmp > 1)
 			break;
 
 		pause("wait thread", hz);
 	}
 
-	dprintf("pwrb: detached from gpio pin %d\n", sc->pinnum);
+	dprintf("pwrb: detached from gpio pin %d\n", sc->pin_num);
 
 	return (0);
 }
