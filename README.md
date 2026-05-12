@@ -11,7 +11,8 @@ This **gpiopwrb** module provides a quick and dirty hack to allow Power Buttons
 to work on such PCs by periodically polling state of given GPIO pin and calling ACPI method
 like \\_SB.GPIO._EVT or \\_SB.PWRB to raise event.
 
-This module was tested on and developped for HP 15e laptop with the following firmware:
+This module was tested on and developped for **HP Laptop Model 15s-eq1337ur** (ProductID 461U9EA#ACB)
+ with the following firmware:
 ```
 [000h 0000 004h]                   Signature : "FACP"    [Fixed ACPI Description Table (FADT)]
 [004h 0004 004h]                Table Length : 00000114
