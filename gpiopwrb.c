@@ -23,13 +23,10 @@
 #include <sys/kenv.h>
 #include <sys/bus.h>
 #include <sys/gpio.h>
-#include <machine/bus.h>
 
 #include <contrib/dev/acpica/include/acpi.h>
 #include <dev/acpica/acpivar.h>
 #include <dev/gpio/gpiobusvar.h>
-
-#include "gpiobus_if.h"
 
 #define	GPIO_POLL_TIMEO		(1000/4)	// Poll GPIO every 1/4 second
 #define	GPIO_PWRB_PIN_NUM	0		// Pin number to monitor: pin 0
