@@ -5,7 +5,7 @@
  * Once state is changed, an _EVT or PWRB method is called to ACPI subsystem
  * to raise system wide even. Helps to bring to life power buttons on some 
  * laptops compliant with ACPI Hardware-Reduced specification. See, README.md
- * for more details.
+ * for more details on https://github.com/pointcheck/gpiopwrb
  *
  * SPDX-License-Identifier: BSD-2-Clause
  *
