@@ -1,10 +1,18 @@
 /*
-* pwrb.c - kernel module for Power Button state change
-*
-* It monitors given pin on GPIO port using standard gpio framework.
-* Once state is changed, an _EVT or PWRB event is raised to ACPI subsystem.
-*
-*/
+ * gpiopwrb.c - FreeBSD kernel module for Power Button state change monitor
+ *
+ * It polls given GPIO pin using standard gpio framework.
+ * Once state is changed, an _EVT or PWRB method is called to ACPI subsystem
+ * to raise system wide even. Helps to bring to life power buttons on some 
+ * laptops compliant with ACPI Hardware-Reduced specification. See, README.md
+ * for more details.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2026 Ruslan Zalata <rz@fabmicro.ru>
+ * All rights reserved.
+ *
+ */
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/module.h>
@@ -28,7 +36,7 @@
 #define	ACPI_PATH_SIZE		32
 #define	GPIO_PWRB_ACPI_PATH	"\\_SB.GPIO._EVT"	// Default ACPI path to call
 
-#define	GPIOPWRB_DEBUG	1
+//#define	GPIOPWRB_DEBUG	1
 
 #ifdef GPIOPWRB_DEBUG
 #define dprintf printf
