@@ -1,0 +1,127 @@
+.\" Copyright (c) 2026, Ruslan Zalata <rz@fabmicro.ru>
+.\" All rights reserved.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.Dd May 28, 2026
+.Dt GPIOPWRB 4
+.Os
+.Sh NAME
+.Nm gpiopwrb
+.Nd GPIO-based Power/Sleep Button driver that polls GPIO pin status and
+raises ACPI event.
+.Sh SYNOPSIS
+To compile this driver into the kernel, place the following lines in your
+kernel configuration file:
+.Bd -ragged -offset indent
+.Cd "device gpio"
+.Cd "device gpiopwrb"
+.Ed
+.Pp
+Alternatively, add this module to
+.Pa kldlist
+variable in your /etc/rc.conf
+.Sh DESCRIPTION
+.Pp
+On many PCs with Hardware-Reduced ACPI equipped with AMD Ryzen CPUs, which
+are mostly modern laptops, Power Button is wired to AMD GPIO controller.
+FreeBSD has support for AMD GPIO since 2018 implemented by
+.Pa amdgpio
+module.  Unfortunately, it does not support interrupts on amd64 platform,
+it's simply not implemented because of lack of INTRNG support in upstream
+.Pa gpiobus
+module. Hence, pressing Power Button will never trigger poweroff or sleep
+event.
+.Pp
+This
+.Nm
+module provides a quick and dirty hack to allow Power Button to work on
+such PCs by periodically polling state of given GPIO pin and calling
+associated ACPI method to raise event.
+.Pp
+The default behaviour of this module is to poll state of GPIO pin 0 and
+to call
+.Pa \\\_SB.GPIO._EVT
+ACPI method. The polling interval is 250 milliseconds.
+
+On some machines GPIO pin number and/or ACPI method name implemented in
+AML firmware can be different. In this case it's possible to configure
+.Nm
+module to use these hint values:
+.Bl -tag -width ".Va hint.gpiopwrb.0.pin_num"
+.It Va hint.gpiopwrb.0.pin_num
+GPIO pin number (decimal or 0x hex). Default: 0.
+.It Va hint.gpiopwrb.0.acpi_path
+ACPI pathname to call on pin state change. Default: \\\_SB.GPIO._EVT
+.El
+.Pp
+Add them to your
+.Pa loader.conf
+like:
+.Pp
+.Bd -literal
+hint.gpiopwrb.0.pin_num=0 # <-- set GPIO pin number for Power Button
+hint.gpiopwrb.0.acpi_path="\\\\_SB.GPIO._EVT" # <-- call this  ACPI event
+.Ed
+.Pp
+or use
+.Xr kenv 1
+utility to set hints temporarily before loading
+.Nm
+module manually with
+.Xr kldload 8
+like in the following:
+.Bd -literal
+# kenv hint.gpiopwrb.0.pin_num=0
+# kenv hint.gpiopwrb.0.acpi_path='\\\_SB.GPIO._EVT'
+.Ed
+.Pp
+Use single backslash and single quote character while in shell.
+.Pp
+.Pp
+To learn exact GPIO pin number one can use
+.Xr gpioctl 8
+utility to get pin list and their current states.
+
+To learn ACPI pathname one has to decompile and analyze AML firmware.
+There are
+.Xr acpidump 8
+utility to dump DSDT (AML code) and
+.Xr iasl 8
+compiler/decompiler to convert AML byte-code to C-style source code
+provided by FreeBSD.
+.Sh SEE ALSO
+.Xr gpio 4 ,
+.Xr gpioctl 8 ,
+.Xr acpidump 8 ,
+.Xr iasl 8
+.Sh OBSOLETE
+The
+.Nm
+module becomes obsolete soon as interrupts are implemented in upstream
+modules
+.Pa gpiobus
+and
+.Pa amdgpio .
+.Sh AUTHORS
+This manual page was written by
+.An Ruslan Zalata.
