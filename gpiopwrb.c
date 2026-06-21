@@ -196,7 +196,7 @@ gpiopwrb_identify(driver_t *driver, device_t parent)
 	    device_get_unit(sc->child_dev));
 
 	if ((hint_value = kern_getenv(hint_str)) != NULL)
-		strncpy(sc->acpi_path, hint_value, ACPI_PATH_SIZE);
+		strlcpy(sc->acpi_path, hint_value, ACPI_PATH_SIZE);
 	else
 		snprintf(sc->acpi_path, ACPI_PATH_SIZE, GPIO_PWRB_ACPI_PATH);
 
