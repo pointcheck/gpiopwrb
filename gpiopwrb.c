@@ -36,25 +36,27 @@
 #define GPIO_PWRB_ACPI_PATH	"\\_SB.GPIO._EVT" // Default ACPI method to call
 #define ACPI_PATH_SIZE		32                // Buf size for ACPI pathname
 
+#define GPIOPWRB_DEBUG	1
+
 #ifdef GPIOPWRB_DEBUG
 #define dprintf printf
 #else
 #define dprintf(x, arg...)
 #endif
 
-struct gpiopwrb_softc {
-	device_t dev;		/* this device */
+static struct gpiopwrb_softc {
+	device_t main_dev;	/* this device */
 	device_t gpiobus_dev;	/* gpiobus parent */
-	device_t child_dev;	/* gpiobus child dev */
+	device_t child_dev;	/* gpiobus child dev (me again) */
 	gpio_pin_t gpio_pin;
 	ACPI_HANDLE acpi_handle;
 	struct mtx thread_mtx;
 	int thread_terminate;
 	int pin_num;
+	struct thread *gpiopwrb_daemon_thread;
 	char acpi_path[ACPI_PATH_SIZE];
 } gpiopwrb_softc_sc;
 
-static struct thread *gpiopwrb_daemon_thread;
 
 static void
 gpiopwrb_call_acpi(struct gpiopwrb_softc *sc)
@@ -83,7 +85,7 @@ gpiopwrb_call_acpi(struct gpiopwrb_softc *sc)
 	status = AcpiEvaluateObject(sc->acpi_handle, NULL, &arglist, NULL);
 
 	if (ACPI_FAILURE(status))
-		printf("pwrb: failed to call AcpiEvaluateObject: %s\n",
+		printf("gpiopwrb: failed to call AcpiEvaluateObject: %s\n",
 			AcpiFormatException(status));
 }
 
@@ -93,15 +95,15 @@ gpiopwrb_daemon(void *arg)
 	struct gpiopwrb_softc *sc = (struct gpiopwrb_softc *) arg;
 
 	if (sc == NULL) {
-		printf("pwrb: bogus softc, thread stopped!\n");
+		printf("gpiopwrb: bogus softc, thread stopped!\n");
 		goto stop_daemon;
 	}
 
-	dprintf("pwrb: kthread %p started, sc = %p\n",
-		gpiopwrb_daemon_thread, sc);
+	dprintf("gpiopwrb: kthread %p started, sc = %p\n",
+		sc->gpiopwrb_daemon_thread, sc);
 
 	if (sc->gpio_pin == NULL) {
-		printf("pwrb: gpio pin %d has not been acquired "
+		printf("gpiopwrb: gpio pin %d has not been acquired "
 			"during attach!\n", sc->pin_num);
 		goto stop_daemon;
 	}
@@ -111,7 +113,7 @@ gpiopwrb_daemon(void *arg)
 	gpio_pin_is_active(sc->gpio_pin, &gpio_state);
 	gpio_state_prev = gpio_state;
 
-	dprintf("pwrb: gpio pin %d state = %d\n", sc->pin_num, gpio_state);
+	dprintf("gpiopwrb: gpio pin %d state = %d\n", sc->pin_num, gpio_state);
 
 	for (;;) {
 		int terminate;
@@ -127,11 +129,11 @@ gpiopwrb_daemon(void *arg)
 
 		bool changed = (gpio_state != gpio_state_prev);
 
-		dprintf("pwrb: poll... gpio pin %d state = %d, changed = %s\n",
+		dprintf("gpiopwrb: poll... gpio pin %d state = %d, changed = %s\n",
 			sc->pin_num, gpio_state, changed ? "YES" : "no");
 
 		if (changed) {
-			printf("pwrb: GPIO pin %d changed, "
+			printf("gpiopwrb: GPIO pin %d changed, "
 				"emmiting ACPI event %s\n",
 				sc->pin_num, sc->acpi_path);
 			gpiopwrb_call_acpi(sc);
@@ -139,12 +141,12 @@ gpiopwrb_daemon(void *arg)
 
 		gpio_state_prev = gpio_state;
 
-		pause_sig("pwrb sleep", GPIO_POLL_TIMEO);
+		pause_sig("gpiopwrb sleep", GPIO_POLL_TIMEO);
 	}
 
 	stop_daemon:
 
-	dprintf("pwrb: kthread %p exited\n", gpiopwrb_daemon_thread);
+	dprintf("gpiopwrb: kthread %p exited\n", sc->gpiopwrb_daemon_thread);
 
 	mtx_lock(&sc->thread_mtx);
 	sc->thread_terminate++;
@@ -156,14 +158,14 @@ gpiopwrb_daemon(void *arg)
 static void
 gpiopwrb_identify(driver_t *driver, device_t parent)
 {
-	dprintf("pwrb: identify\n");
+	dprintf("gpiopwrb: identify\n");
 
 	struct gpiopwrb_softc *sc = &gpiopwrb_softc_sc;
 
 	KASSERT(sc != NULL, ("softc is NULL."));
 
 	if (sc->child_dev) {
-		dprintf("pwrb: child_dev = %p already set for parrent = %p\n",
+		dprintf("gpiopwrb: child_dev = %p already set for parrent = %p\n",
 			sc->child_dev, parent);
 		return;
 	}
@@ -180,14 +182,16 @@ gpiopwrb_identify(driver_t *driver, device_t parent)
 	    device_get_name(sc->child_dev),
 	    device_get_unit(sc->child_dev));
 
-	if ((hint_value = kern_getenv(hint_str)) != NULL)
+	if ((hint_value = kern_getenv(hint_str)) != NULL) {
 		sc->pin_num = strtol(hint_value, NULL, 0);
+		freeenv(hint_value);
+	}
 	else
 		sc->pin_num = GPIO_PWRB_PIN_NUM;
 
-	dprintf("pwrb: new child_dev = %p for parrent = %p, "
+	dprintf("gpiopwrb: new child_dev = %p for parrent = %p, main_dev = %p, "
 		"pin_num = %d, %s = %s\n",
-		sc->child_dev, parent, sc->pin_num, hint_str, hint_value);
+		sc->child_dev, parent, sc->main_dev, sc->pin_num, hint_str, hint_value);
 
 	/* Fetch ACPI path from Hints */
 
@@ -195,12 +199,14 @@ gpiopwrb_identify(driver_t *driver, device_t parent)
 	    device_get_name(sc->child_dev),
 	    device_get_unit(sc->child_dev));
 
-	if ((hint_value = kern_getenv(hint_str)) != NULL)
+	if ((hint_value = kern_getenv(hint_str)) != NULL) {
 		strlcpy(sc->acpi_path, hint_value, ACPI_PATH_SIZE);
+		freeenv(hint_value);
+	}
 	else
-		snprintf(sc->acpi_path, ACPI_PATH_SIZE, GPIO_PWRB_ACPI_PATH);
+		strlcpy(sc->acpi_path, GPIO_PWRB_ACPI_PATH, ACPI_PATH_SIZE);
 
-	dprintf("pwrb: acpi path hint = %s, value = %s\n",
+	dprintf("gpiopwrb: acpi path hint = %s, value = %s\n",
 		hint_str, sc->acpi_path);
 
 	device_set_softc(sc->child_dev, sc);
@@ -216,7 +222,7 @@ gpiopwrb_probe(device_t dev)
 
 	device_set_desc(dev, "GPIO Power Button Monitor");
 
-	dprintf("pwrb: probed\n");
+	dprintf("gpiopwrb: probed\n");
 
 	return (BUS_PROBE_DEFAULT);
 }
@@ -230,27 +236,27 @@ gpiopwrb_attach(device_t dev)
 
 	KASSERT(sc != NULL, ("softc is NULL."));
 
-	sc->dev = dev;
-	sc->gpiobus_dev = device_get_parent(dev);
+	sc->main_dev = dev;
 
 	ACPI_STATUS acpi_status = AcpiGetHandle(NULL, sc->acpi_path,
 		&sc->acpi_handle);
 
 	if (ACPI_FAILURE(acpi_status)) {
-		printf("pwrb: failed to get ACPI handle for %s: %s\n",
+		printf("gpiopwrb: failed to get ACPI handle for %s: %s\n",
 			sc->acpi_path,
 			AcpiFormatException(acpi_status));
-		return (EINVAL);
+		return (ENXIO);
 	}
 
-	dprintf("pwrb: gpiobus = %s, child = %s\n",
+	dprintf("gpiopwrb: attached to gpiobus = %s, child = %s, main_dev = %s\n",
 		device_get_name(sc->gpiobus_dev),
-		device_get_name(sc->child_dev));
+		device_get_name(sc->child_dev),
+		device_get_name(sc->main_dev));
 
 	error = gpio_pin_get_by_bus_pinnum(sc->gpiobus_dev,
 		sc->pin_num, &sc->gpio_pin);
 
-	dprintf("pwrb: gpio_pin_get_by_bus_pin_num error = %d, "
+	dprintf("gpiopwrb: gpio_pin_get_by_bus_pin_num error = %d, "
 		"gpio_pin->pin = %d, gpio_pin->flags = %x, "
 		"gpio_pin->dev = %p, devname = %s\n",
 		error,
@@ -258,7 +264,7 @@ gpiopwrb_attach(device_t dev)
 		device_get_name(sc->gpio_pin->dev));
 
 	if (error) {
-		printf("pwrb: failed to get GPIO pin %d value, gpiobus = %p, "
+		printf("gpiopwrb: failed to get GPIO pin %d value, gpiobus = %p, "
 			"child = %p, error = %d\n",
 			sc->pin_num, sc->gpiobus_dev, sc->child_dev, error);
 		return (ENXIO);
@@ -268,17 +274,18 @@ gpiopwrb_attach(device_t dev)
 
 	mtx_init(&sc->thread_mtx, "pwrb thread mtx", NULL, MTX_DEF);
 
-	error = kthread_add(gpiopwrb_daemon, sc, NULL, &gpiopwrb_daemon_thread,
+	error = kthread_add(gpiopwrb_daemon, sc, NULL,
+		&sc->gpiopwrb_daemon_thread,
 		0, 0, "pwrb_daemon");
 
 	if (error) {
-		printf("pwrb: failed to start kthread, error = %d\n", error);
+		printf("gpiopwrb: failed to start kthread, error = %d\n", error);
 		return (error);
 	}
 
 	device_set_softc(dev, sc);
 
-	printf("pwrb: attached to gpio pin %d\n", sc->pin_num);
+	printf("gpiopwrb: attached to gpio pin %d\n", sc->pin_num);
 
 	return (0);
 }
@@ -290,12 +297,12 @@ gpiopwrb_detach(device_t dev)
 
 	KASSERT(sc != NULL, ("softc is NULL."));
 
-	kthread_resume(gpiopwrb_daemon_thread);
+	kthread_resume(sc->gpiopwrb_daemon_thread);
 
 	/* signal kthread to terminate */
 	sc->thread_terminate++;
 
-	dprintf("pwrb: waiting thread termination...\n");
+	dprintf("gpiopwrb: waiting thread termination...\n");
 
 	for (;;) {
 		mtx_lock(&sc->thread_mtx);
@@ -308,7 +315,7 @@ gpiopwrb_detach(device_t dev)
 		pause("wait thread", hz);
 	}
 
-	dprintf("pwrb: detached from gpio pin %d\n", sc->pin_num);
+	dprintf("gpiopwrb: detached from gpio pin %d\n", sc->pin_num);
 
 	return (0);
 }
@@ -324,7 +331,7 @@ static device_method_t gpiopwrb_methods[] = {
 DEFINE_CLASS_0(gpiopwrb, gpiopwrb_driver, gpiopwrb_methods,
 	sizeof(struct gpiopwrb_softc));
 DRIVER_MODULE(gpiopwrb, gpiobus, gpiopwrb_driver, 0, 0);
-MODULE_DEPEND(gpiopwrb, acpi, 1, 1, 1);
-MODULE_DEPEND(gpiopwrb, gpiobus, 1, 1, 1);
-MODULE_DEPEND(gpiopwrb, amdgpio, 1, 1, 1);
+MODULE_DEPEND(gpiopwrb, gpiobus, 1, 1, 0);
+MODULE_DEPEND(gpiopwrb, acpi, 1, 1, 0);
+MODULE_DEPEND(gpiopwrb, amdgpio, 1, 1, 0);
 MODULE_VERSION(gpiopwrb, 1);
