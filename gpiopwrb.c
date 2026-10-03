@@ -22,7 +22,6 @@
 #include <sys/systm.h>
 #include <sys/kthread.h>
 #include <sys/mutex.h>
-#include <sys/systm.h>
 #include <sys/kenv.h>
 #include <sys/bus.h>
 #include <sys/gpio.h>
@@ -31,7 +30,7 @@
 #include <dev/acpica/acpivar.h>
 #include <dev/gpio/gpiobusvar.h>
 
-#define GPIO_POLL_TIMEO		(1000 / 4)        // Poll GPIO every 1/4 second
+#define GPIO_POLL_TIMEO		(hz / 4)        // Poll GPIO every 1/4 second
 #define GPIO_PWRB_PIN_NUM	0                 // Default pin number
 #define GPIO_PWRB_ACPI_PATH	"\\_SB.GPIO._EVT" // Default ACPI method to call
 #define ACPI_PATH_SIZE		32                // Buf size for ACPI pathname
@@ -70,16 +69,14 @@ gpiopwrb_call_acpi(struct gpiopwrb_softc *sc)
 
 	/*
 	 * ACPI event \_SB.GPIO._EVT usually takes two arguments:
-	 * arg0 - event source number (GPIO pin number)
-	 * arg1 - 0x80 for status change
+	 * arg0 - event source number (GPIO pin number) that has
+	 *        status changed.
 	 *
 	 */
 
 	args[0].Type = ACPI_TYPE_INTEGER;
 	args[0].Integer.Value = (ACPI_INTEGER) (INT64)0;
-	args[1].Type = ACPI_TYPE_INTEGER;
-	args[1].Integer.Value = (ACPI_INTEGER) (INT64)0x80;
-	arglist.Count = 2;
+	arglist.Count = 1;
 	arglist.Pointer = args;
 
 	status = AcpiEvaluateObject(sc->acpi_handle, NULL, &arglist, NULL);
@@ -103,7 +100,7 @@ gpiopwrb_daemon(void *arg)
 		sc->gpiopwrb_daemon_thread, sc);
 
 	if (sc->gpio_pin == NULL) {
-		printf("gpiopwrb: gpio pin %d has not been acquired "
+		printf("gpiopwrb: gpio pin %d had not been acquired "
 			"during attach!\n", sc->pin_num);
 		goto stop_daemon;
 	}
@@ -141,7 +138,7 @@ gpiopwrb_daemon(void *arg)
 
 		gpio_state_prev = gpio_state;
 
-		pause_sig("gpiopwrb sleep", GPIO_POLL_TIMEO);
+		pause_sig("gpiopwrb", GPIO_POLL_TIMEO);
 	}
 
 	stop_daemon:
@@ -300,7 +297,9 @@ gpiopwrb_detach(device_t dev)
 	kthread_resume(sc->gpiopwrb_daemon_thread);
 
 	/* signal kthread to terminate */
+	mtx_lock(&sc->thread_mtx);
 	sc->thread_terminate++;
+	mtx_unlock(&sc->thread_mtx);
 
 	dprintf("gpiopwrb: waiting thread termination...\n");
 
@@ -312,8 +311,13 @@ gpiopwrb_detach(device_t dev)
 		if (tmp > 1)
 			break;
 
-		pause("wait thread", hz);
+		pause("wterm", hz / 100);
 	}
+
+	gpio_pin_release(sc->gpio_pin);
+
+	mtx_lock(&sc->thread_mtx);
+	mtx_destroy(&sc->thread_mtx);
 
 	dprintf("gpiopwrb: detached from gpio pin %d\n", sc->pin_num);
 
