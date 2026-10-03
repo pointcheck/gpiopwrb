@@ -35,7 +35,7 @@
 #define GPIO_PWRB_ACPI_PATH	"\\_SB.GPIO._EVT" // Default ACPI method to call
 #define ACPI_PATH_SIZE		32                // Buf size for ACPI pathname
 
-#define GPIOPWRB_DEBUG	1
+//#define GPIOPWRB_DEBUG	1
 
 #ifdef GPIOPWRB_DEBUG
 #define dprintf printf
