@@ -75,7 +75,7 @@ gpiopwrb_call_acpi(struct gpiopwrb_softc *sc)
 	 */
 
 	args[0].Type = ACPI_TYPE_INTEGER;
-	args[0].Integer.Value = (ACPI_INTEGER) (INT64)0;
+	args[0].Integer.Value = (ACPI_INTEGER) (INT64)sc->pin_num;
 	arglist.Count = 1;
 	arglist.Pointer = args;
 
