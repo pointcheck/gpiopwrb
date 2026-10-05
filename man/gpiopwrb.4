@@ -109,6 +109,14 @@ utility to dump DSDT (AML code) and
 .Xr iasl 8
 compiler/decompiler to convert AML byte-code to C-style source code
 provided by FreeBSD.
+.Sh NOTE 
+It is possible to add
+.Nm
+module to loader config for early load. To do
+this just add the following line into /boot/loader.conf:
+.Pp
+gpiopwrb_load="YES"
+.Pp
 .Sh SEE ALSO
 .Xr gpio 4 ,
 .Xr gpioctl 8 ,
