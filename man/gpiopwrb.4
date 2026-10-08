@@ -1,3 +1,6 @@
+.\"
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
 .\" Copyright (c) 2026, Ruslan Zalata <rz@fabmicro.ru>
 .\" All rights reserved.
 .\"
@@ -22,7 +25,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd May 28, 2026
+.Dd $Mdocdate$
 .Dt GPIOPWRB 4
 .Os
 .Sh NAME
@@ -30,16 +33,16 @@
 .Nd GPIO-based Power/Sleep Button driver that polls GPIO pin status and
 raises ACPI event.
 .Sh SYNOPSIS
-To compile this driver into the kernel, place the following lines in your
-kernel configuration file:
-.Bd -ragged -offset indent
-.Cd "device gpio"
-.Cd "device gpiopwrb"
+To compile and install this driver, use
+.Bd -literal -offset indent
+make
+make install
 .Ed
 .Pp
-Alternatively, add this module to
-.Pa kldlist
-variable in your /etc/rc.conf
+as superuser. Then, add this module to
+.Ev kld_list
+variable in your
+.Pa /etc/rc.conf
 .Sh DESCRIPTION
 .Pp
 On many PCs with Hardware-Reduced ACPI equipped with AMD Ryzen CPUs, which
@@ -75,7 +78,7 @@ ACPI pathname to call on pin state change. Default: \\\_SB.GPIO._EVT
 .El
 .Pp
 Add them to your
-.Pa loader.conf
+.Pa /boot/loader.conf
 like:
 .Pp
 .Bd -literal
@@ -113,9 +116,10 @@ provided by FreeBSD.
 It is possible to add
 .Nm
 module to loader config for early load. To do
-this just add the following line into /boot/loader.conf:
+this just add the following line into
+.Pa /boot/loader.conf :
 .Pp
-gpiopwrb_load="YES"
+.Ev gpiopwrb_load="YES"
 .Pp
 .Sh SEE ALSO
 .Xr gpio 4 ,
